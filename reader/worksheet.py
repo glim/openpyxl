@@ -38,7 +38,7 @@ except ImportError:
     from io import BytesIO, StringIO
 
 from openpyxl.cell import get_column_letter
-from openpyxl.shared.xmltools import fromstring, QName
+from openpyxl.shared.xmltools import fromstring, QName, SubElement
 
 # package imports
 from openpyxl.cell import Cell, coordinate_from_string
@@ -121,17 +121,66 @@ def fast_parse(ws, xml_source, string_table, style_table):
 
     it = iterparse(source)
 
+    formula_table = {}
+    import re
+    from openpyxl.cell import column_index_from_string 
+    ALL_COORD_RE = re.compile('([$]?)([A-Z]+)([$]?)(\d+)')
+
+    def joffset_cell(start_coord,stop_coord,target_coord):
+        
+        start_col,start_row = column_index_from_string(start_coord[1]),int(start_coord[3])
+        stop_col,stop_row = column_index_from_string(stop_coord[1]),int(stop_coord[3])
+        target_col,target_row = column_index_from_string(target_coord[1]),int(target_coord[3])
+        
+        diff_row = stop_row - start_row
+        diff_col = stop_col - start_col
+        
+        if target_coord[2]:
+            out_row = target_row
+        else:
+            out_row = target_row + diff_row
+        if target_coord[0]:
+            print target_coord
+            out_col = target_col
+        else:
+            out_col = target_col + diff_col 
+        
+        return get_column_letter(out_col) + str(out_row)
+
+    def joffset_formula(start,stop,formula):
+        start_coord = ALL_COORD_RE.match(start).groups()
+        stop_coord = ALL_COORD_RE.match(stop).groups()
+        return ALL_COORD_RE.sub(lambda x: joffset_cell(start_coord,stop_coord,x.groups()),formula)
+    
     for event, element in filter(filter_cells, it):
-
+        formula = element.find('{http://schemas.openxmlformats.org/spreadsheetml/2006/main}f')                    
         value = element.findtext('{http://schemas.openxmlformats.org/spreadsheetml/2006/main}v')
-
+        
         coordinate = element.get('r')
+        
+        if formula is not None:            
+            formula_text = ''
+            if value is None:                
+                value = SubElement(element,'v')                            
+
+            if formula.text:
+                formula_text = formula.text                
+                if formula.get('t',None) == 'shared': #if there is a formula, add it to teh ref                                         
+                    formula_table[formula.get('si')] = {'text': formula_text, 'cell': coordinate }                    
+            else:
+                shared_formula = formula_table[formula.get('si')]
+                formula_text = joffset_formula(shared_formula['cell'],coordinate,shared_formula['text'])                
+            
+            value = '=' + formula_text
+        
         style_id = element.get('s')
         if style_id is not None:
             ws._styles[coordinate] = style_table.get(int(style_id))
 
         if value is not None:
             data_type = element.get('t', 'n')
+            if formula:
+                dat_type = 'f'
             if data_type == Cell.TYPE_STRING:
                 value = string_table.get(int(value))
 
