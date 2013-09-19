@@ -24,6 +24,9 @@
 # @author: see AUTHORS file
 
 """Imports for the openpyxl package."""
+import sys
+from os import path
+sys.path.append(path.abspath(path.join(path.dirname(__file__), path.pardir)))
 
 # package imports
 from openpyxl import cell
